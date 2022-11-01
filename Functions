@@ -1,0 +1,40 @@
+# Function to calculate missing value and % w.r.t columns
+def miss_data(df):
+    x = ['column_name','missing_data', 'missing_in_percentage']
+    missing_data = pd.DataFrame(columns=x)
+    columns = df.columns
+    for col in columns:
+        icolumn_name = col
+        imissing_data = df[col].isnull().sum()
+        imissing_in_percentage = round((df[col].isnull().sum()/df[col].shape[0])*100,2)
+        missing_data.loc[len(missing_data)] = [icolumn_name, imissing_data, imissing_in_percentage]
+    return(missing_data)
+    
+ # Removing outliers function
+def remove_outlier(df_in, col_name):
+    q1 = df_in[col_name].quantile(0.25)
+    q3 = df_in[col_name].quantile(0.75)
+    iqr = q3-q1 #Interquartile range
+    fence_low  = q1-1.5*iqr
+    fence_high = q3+1.5*iqr
+    df_out = df_in.loc[(df_in[col_name] > fence_low) & (df_in[col_name] < fence_high)]
+    print(len(df_out))
+    return df_out
+    
+# one hot function
+def one_hot(df,variables):
+    one_hot_output=pd.get_dummies(df,columns=variables)
+    return one_hot_output
+    
+ # train and test  function 
+def trainTestSplit(df,target_var,split):
+    # split data into input and taget variable(s)
+    x = df.drop(target_var, axis=1)
+    y = df[target_var]
+    ## Splitting the data into train and test
+    X_train, X_test, y_train, y_test = train_test_split(x,y,test_size=split,random_state=0)
+    return x,y,X_train, X_test, y_train, y_test
+ 
+ 
+    
+    
