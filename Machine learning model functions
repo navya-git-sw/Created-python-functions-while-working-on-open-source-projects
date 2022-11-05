@@ -1,0 +1,287 @@
+import warnings
+warnings.filterwarnings("ignore")
+import pandas as pd
+import numpy as np
+import time
+import pickle
+import os
+from sklearn.model_selection import KFold, StratifiedKFold
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GridSearchCV
+from sklearn import model_selection
+from sklearn.linear_model import LogisticRegression
+from datetime import datetime
+pd.pandas.set_option('display.max_columns', None)
+pd.set_option('display.float_format', lambda x: '%.3f' % x)
+from sklearn.ensemble import RandomForestClassifier
+from sklearn import tree
+from sklearn.metrics import  precision_recall_curve, roc_auc_score, confusion_matrix, accuracy_score, recall_score, precision_score, f1_score,auc, roc_curve, plot_confusion_matrix
+from IPython.display import Image
+import matplotlib.pyplot as plt
+import seaborn as sns
+%matplotlib inline
+color = sns.color_palette()
+seed = 42
+from sklearn.metrics import ConfusionMatrixDisplay
+
+# Create a function to define a parameters for different models
+def parameters_diff_model(modelname):
+
+    if modelname == "rf":
+        # Number of trees in random forest
+        n_estimators = [25,50,75,100]
+
+        # Number of features to consider at every split
+        max_features = ['auto']
+        max_depth = [5,6,7,8,9,10] 
+        class_weight = ['balanced']
+        
+        # Create the random grid
+        grid = {'n_estimators': n_estimators,
+                'max_features': max_features,
+                'max_depth': max_depth,
+                'class_weight' : class_weight
+
+               }
+
+    elif modelname == "xgb":
+        # Number of trees in xgb
+        n_estimators =  [25,50,100,150]
+        max_depth = [5,6,7,8,9,10] 
+        subsample=[0.5,0.6,0.7] ## proportion of training instances used in trees
+        eta= [0.01,0.05,0.10]  ## learning rate
+        gamma= [0.00,0.05,0.10]  ## minimum loss function reduction required for a split
+        class_weight = ['balanced']
+
+        # Create the random grid
+        grid = {'n_estimators': n_estimators,
+                       'max_depth': max_depth,
+                       'subsample': subsample,
+                       'eta': eta,
+                       'gamma': gamma,
+                       'class_weight' : class_weight
+
+                       }
+
+    elif modelname == "dt":
+
+        # Number of features to consider at every split
+        max_features = ['auto']
+        # Maximum number of levels in tree
+        max_depth = [5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20] 
+        # Minimum number of samples required to split a node
+        min_samples_split = [5,10,15,20,25,30] 
+        # Minimum number of samples required at each leaf node
+        min_samples_leaf = [5,6,7,8,9,10,11,12,13,14,15] 
+        class_weight = ['balanced']
+
+
+        # Create the random grid
+        grid = {'max_features': max_features,
+                'max_depth': max_depth,
+                'min_samples_split': min_samples_split,
+                'min_samples_leaf': min_samples_leaf,
+                'class_weight' : class_weight
+                }
+        
+    elif modelname == "logit":
+
+        solvers = ['newton-cg', 'lbfgs', 'liblinear']
+        penalty = ['l2']
+        c_values = [100, 10, 1.0, 0.1, 0.01]
+        class_weight = ['balanced']
+
+        # Create the random grid
+        grid = {'solver': solvers,
+                'penalty': penalty,
+                'C': c_values,
+                'class_weight' : class_weight
+
+               }
+        
+    
+    return grid
+
+
+# ROC Curve: Area Under the Curve
+def auc_roc_plot(y_test, y_preds):
+    fpr, tpr, thresholds = roc_curve(y_test,y_preds)
+    roc_auc = auc(fpr, tpr)
+    print(roc_auc)
+    plt.title('Receiver Operating Characteristic')
+    plt.plot(fpr, tpr, 'b', label = 'AUC = %0.2f' % roc_auc)
+    plt.legend(loc = 'lower right')
+    plt.plot([0, 1], [0, 1], 'r--')
+    plt.xlim([0, 1])
+    plt.ylim([0, 1])
+    plt.ylabel('True Positive Rate')
+    plt.xlabel('False Positive Rate')
+    plt.show()
+    
+ #### Training the models.  
+  
+ def model_fun(df, model_name, params, kfold=5):
+    error_metrics_df = pd.DataFrame(columns=['Model name','train_count','test_count','train_accuracy',
+                                             'test_accuracy','train_precision','test_precision',
+                                             'train_recall','test_recall','train_Fscore','test_Fscore',
+                                          'roc_auc_train','roc_auc_test','run_time'])
+    
+    print(df.shape)
+    X = df.loc[:, df.columns != 'TARGET']
+    y = df.loc[:, df.columns == 'TARGET']
+    
+    
+    # Splitting the data into 70% training/validation data and 30% testing data
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=69,stratify=y)
+    
+
+    if model_name =='rf':
+        rf = RandomForestClassifier()
+        grid_search = GridSearchCV(estimator=rf,
+                           param_grid=params,
+                           cv = kfold,
+                           n_jobs=-1, verbose=1)
+
+    elif model_name =='dt':
+        dt = DecisionTreeClassifier()
+        grid_search = GridSearchCV(estimator=dt,
+                           param_grid=params,
+                           cv = kfold,
+                           n_jobs=-1, verbose=1)
+
+    elif model_name == 'logit':
+        logistic = LogisticRegression()
+        grid_search = GridSearchCV(estimator=logistic,
+                           param_grid=params,
+                           cv = kfold,
+                           n_jobs=-1, verbose=1)
+        
+    elif model_name == 'xgb':
+        xgb_model = xgb.XGBClassifier(objective="binary:logistic", random_state=42)
+        grid_search = GridSearchCV(estimator= xgb_model,
+                           param_grid=params,
+                           cv = kfold,
+                           n_jobs=-1, verbose=1)
+
+
+    
+
+    start = datetime.now()
+    model = grid_search.fit(X_train, y_train)
+    end = datetime.now()
+    time_taken = end - start
+    print('Time: ',time_taken) 
+    
+    rf_best = model.best_estimator_
+    
+    print('best_estimator', rf_best)
+    
+    if model_name == 'rf':
+        pickle.dump(model.best_estimator_, open('rf_model_save.pickle', 'wb'))
+    elif model_name == 'xgb':
+        pickle.dump(model.best_estimator_, open('xgb_model_save.pickle', 'wb'))
+    elif model_name == 'dt':
+        pickle.dump(model.best_estimator_, open('dt_model_save.pickle', 'wb'))
+    elif model_name == 'logit':
+        pickle.dump(model.best_estimator_, open('logit_model_save.pickle', 'wb'))
+    
+
+    if model_name =='rf':
+        feature_importances_df = pd.DataFrame(
+                {"feature": list(X_train.columns), "importance": rf_best.feature_importances_}
+                ).sort_values("importance", ascending=False)
+        feature_importances_df.to_csv("rf_model_feature_imp.csv",index= False)
+
+    
+    y_train_pred=rf_best.predict(X_train)
+    
+    ### Appending y_train and y_train_pred to X_train
+    X_train[model_name+'_actual'] = y_train
+    X_train[model_name+'_pred'] = y_train_pred
+    X_train[model_name+'_TrainTest'] ="train"
+      
+    #predicting test
+    y_test_pred = rf_best.predict(X_test)
+    
+    ### Appending y_test and y_test_pred to X_test
+    X_test[model_name+'_actual'] = y_test
+    X_test[model_name+'_pred'] = y_test_pred
+    X_test[model_name+'_TrainTest'] ="test"
+    
+    ### Appending TRAIN and TEST datasets
+    train_test_final= X_train.append(X_test)
+
+    ### Appending to the original data frame
+    final_data = pd.merge(df,train_test_final[[model_name+'_actual',model_name+'_pred',model_name+'_TrainTest']],left_index=True,right_index=True)
+    
+
+
+    ### Error metrics calculation 
+    acc_tr = accuracy_score(y_train,y_train_pred)
+    acc_te = accuracy_score(y_test,y_test_pred)
+
+    f1_tr = f1_score(y_train,y_train_pred)
+    f1_te = f1_score(y_test,y_test_pred)
+
+    prec_tr = precision_score(y_train,y_train_pred)
+    prec_te = precision_score(y_test,y_test_pred)
+
+    rec_tr = recall_score(y_train,y_train_pred)
+    rec_te = recall_score(y_test,y_test_pred)
+    
+    roc_auc_tr = roc_auc_score(y_train,y_train_pred)
+    roc_auc_te = roc_auc_score(y_test,y_test_pred)
+
+    
+    
+    #p_values = pd.DataFrame(lr_1.pvalues)
+    summary = pd.DataFrame([[model_name,len(X_train),len(X_test),
+                             str(round(acc_tr,3)),
+                             str(round(acc_te,3)),
+                             str(round(prec_tr,3)),
+                             str(round(prec_te,3)),
+                             str(round(rec_tr,3)),
+                             str(round(rec_te,3)),
+                             str(round(f1_tr,3)),
+                             str(round(f1_te,3)),
+                             str(round(roc_auc_tr,3)),
+                             str(round(roc_auc_te,3)),
+                             str(time_taken)
+                             
+                            ]],
+                            columns=['Model name','train_count','test_count','train_accuracy',
+                                     'test_accuracy','train_precision','test_precision',
+                                     'train_recall','test_recall','train_Fscore','test_Fscore',
+                                     'roc_auc_train','roc_auc_test','run_time'])
+
+    error_metrics_df = pd.concat([error_metrics_df,summary], axis=0)
+    
+    ### Plotting roc curve
+    auc_roc_plot(y_train,y_train_pred)
+    auc_roc_plot(y_test,y_test_pred)
+    
+    # Confusion Matrix display
+    #plot_confusion_matrix(, X_train, y_train, values_format=".4g", cmap="Blues");
+    cm_train = confusion_matrix(y_train, y_train_pred)
+    cm_test = confusion_matrix(y_test, y_test_pred)
+
+    ### Confusion matrix - train 
+    plt.figure()
+    disp_train = ConfusionMatrixDisplay(confusion_matrix=cm_train,display_labels=["Non-Defaulters","Defaulters"])
+    disp_train = disp_train.plot(values_format='')
+    #disp_train
+    plt.show()
+    
+    ### Confusion matrix - test 
+    plt.figure()
+    disp_test = ConfusionMatrixDisplay(confusion_matrix=cm_test,display_labels=["Non-Defaulters","Defaulters"])
+    disp_test = disp_test.plot(values_format='')
+    #disp_test
+    plt.show()
+    
+        
+    return X_train, y_train,X_test, y_test,model,rf_best,final_data,error_metrics_df,y_train_pred, y_test_pred
+ 
+ #### calling the funciton. 
+ #### grid = parameters_diff_model('rf'), 
+ #### X_train, y_train,X_test, y_test,train_data_new_model,train_data_new_best_estimators,train_data_new_final_data,train_data_new_error_metrics_df,y_train_pred,y_test_pred = model_fun(df,'rf', grid, kfold=5)
